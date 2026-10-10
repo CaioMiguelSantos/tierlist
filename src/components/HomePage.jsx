@@ -2,6 +2,12 @@ export default function HomePage({ aoIniciar }) {
   return (
     <div style={estilos.pagina}>
       <div style={estilos.conteudo}>
+        <img
+          src="/smash bro.jpg"
+          alt="Super Smash Bros. Ultimate"
+          style={estilos.imagem}
+        />
+
         <h1 style={estilos.titulo}>Tier List de Jogos</h1>
         <p style={estilos.subtitulo}>
           Organize seus jogos favoritos em uma tier list arrastando as capas
@@ -28,7 +34,19 @@ const estilos = {
   },
   conteudo: {
     maxWidth: "480px",
+    width: "100%",
     textAlign: "center",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  imagem: {
+    width: "100%",
+    maxWidth: "580px",
+    height: "auto",
+    borderRadius: "15px",
+    border: "1px solid #2b2c34",
+    marginBottom: "28px",
   },
   titulo: {
     fontSize: "32px",
