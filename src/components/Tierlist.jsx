@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 /**
  * TierList
@@ -40,32 +40,210 @@ const bancoJogosInicial = [
   { id: 19, titulo: "Danganronpa: Trigger Happy Havoc", capaUrl: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ0xAnl9kXnm4Kdl7nFn1Dly1OJnysQnsEUXlo0vnEIAA&s=10",genero: "RPG" },
 ];
 
-const TIERS = [
-  { chave: "S", label: "S", cor: "#ff5b5b" },
-  { chave: "A", label: "A", cor: "#ff9f4d" },
-  { chave: "B", label: "B", cor: "#ffd93d" },
-  { chave: "C", label: "C", cor: "#8fd94f" },
-  { chave: "D", label: "D", cor: "#4fa3d9" },
+const TIERS_PADRAO = [
+  { id: "S", nome: "S", cor: "#ff5b5b" },
+  { id: "A", nome: "A", cor: "#ff9f4d" },
+  { id: "B", nome: "B", cor: "#ffd93d" },
+  { id: "C", nome: "C", cor: "#8fd94f" },
+  { id: "D", nome: "D", cor: "#4fa3d9" },
 ];
 
-const CHAVE_CUSTOM = "tierlist:jogosCustom";
+// Cores usadas (em ordem) nas categorias novas
+const CORES_NOVAS = ["#b57bff", "#ff7bd0", "#5be0c8", "#c9c9d1", "#ff8a5b", "#7bd0ff"];
 
-// ---------- Estado inicial da tier list ----------
-function criarTierListInicial(jogos) {
-  return {
-    S: [],
-    A: [],
-    B: [],
-    C: [],
-    D: [],
-    semClassificacao: jogos.map((jogo) => jogo.id),
-  };
+const TAMANHO_MAX_NOME = 14;
+const MAX_TIERS = 12;
+const CHAVE_CUSTOM = "tierlist:jogosCustom";
+const COR_HEX = /^#[0-9a-fA-F]{6}$/;
+
+// ---------- CSS para o que depende de :hover (não dá para fazer inline) ----------
+const CSS = `
+.tl-linha .tl-menu-btn { opacity: 0; transition: opacity .15s; }
+.tl-linha:hover .tl-menu-btn,
+.tl-menu-btn.aberto,
+.tl-menu-btn:focus-visible { opacity: 1; }
+
+.tl-capa .tl-remover { opacity: 0; transition: opacity .15s; }
+.tl-capa:hover .tl-remover,
+.tl-remover:focus-visible { opacity: 1; }
+
+@media (hover: none) {
+  .tl-linha .tl-menu-btn,
+  .tl-capa .tl-remover { opacity: 1; }
 }
 
-// ---------- localStorage: carregar a tier list ----------
-// Ignora ids que não existem mais, remove duplicados e coloca
-// jogos novos em "semClassificacao".
-function carregarTierList(chaveStorage, jogos) {
+.tl-item { transition: background .12s; }
+.tl-item:hover:not([disabled]) { background: #2e2f38; }
+.tl-ghost:hover { background: #23242c; }
+`;
+
+// ---------- Ícones (SVG de traço fino, todos no mesmo estilo) ----------
+function Icone({ nome, tamanho = 14 }) {
+  const base = {
+    width: tamanho,
+    height: tamanho,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+    style: { display: "block", flexShrink: 0 },
+  };
+
+  switch (nome) {
+    case "mais-opcoes":
+      return (
+        <svg {...base} fill="currentColor" stroke="none">
+          <circle cx="5" cy="12" r="1.9" />
+          <circle cx="12" cy="12" r="1.9" />
+          <circle cx="19" cy="12" r="1.9" />
+        </svg>
+      );
+    case "editar":
+      return (
+        <svg {...base}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      );
+    case "cima":
+      return (
+        <svg {...base}>
+          <polyline points="18 15 12 9 6 15" />
+        </svg>
+      );
+    case "baixo":
+      return (
+        <svg {...base}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      );
+    case "lixeira":
+      return (
+        <svg {...base}>
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+        </svg>
+      );
+    case "fechar":
+      return (
+        <svg {...base}>
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...base}>
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      );
+    case "mais":
+      return (
+        <svg {...base}>
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      );
+    case "voltar":
+      return (
+        <svg {...base}>
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      );
+    case "imagem":
+      return (
+        <svg {...base}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+// ---------- Cor do texto (claro/escuro) conforme o fundo da categoria ----------
+function corTexto(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#14151a" : "#ffffff";
+}
+
+// ---------- Descobre qual linha está sob o ponteiro ----------
+function descobrirTier(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const alvo = el ? el.closest("[data-tier]") : null;
+  return alvo ? alvo.getAttribute("data-tier") : null;
+}
+
+// ---------- Estado inicial da tier list ----------
+function criarTierListInicial(jogos, tiers) {
+  const base = {};
+  for (const tier of tiers) base[tier.id] = [];
+  base.semClassificacao = jogos.map((jogo) => jogo.id);
+  return base;
+}
+
+// ---------- localStorage: carregar as categorias ----------
+// Também aproveita os nomes salvos na versão anterior ("tierlist:nomes:<genero>").
+function carregarTiers(chaveTiers, chaveNomesAntiga) {
+  try {
+    const salvo = localStorage.getItem(chaveTiers);
+    if (salvo) {
+      const dados = JSON.parse(salvo);
+      if (Array.isArray(dados)) {
+        const vistos = new Set();
+        const validos = [];
+        for (const t of dados) {
+          if (
+            t &&
+            typeof t.id === "string" &&
+            t.id !== "semClassificacao" &&
+            !vistos.has(t.id) &&
+            typeof t.nome === "string"
+          ) {
+            vistos.add(t.id);
+            validos.push({
+              id: t.id,
+              nome: t.nome.trim().slice(0, TAMANHO_MAX_NOME) || t.id,
+              cor: typeof t.cor === "string" && COR_HEX.test(t.cor) ? t.cor : "#c9c9d1",
+            });
+          }
+        }
+        if (validos.length > 0) return validos;
+      }
+    }
+
+    const antigo = localStorage.getItem(chaveNomesAntiga);
+    if (antigo) {
+      const nomes = JSON.parse(antigo);
+      if (nomes && typeof nomes === "object") {
+        return TIERS_PADRAO.map((t) => ({
+          ...t,
+          nome:
+            typeof nomes[t.id] === "string" && nomes[t.id].trim()
+              ? nomes[t.id].trim().slice(0, TAMANHO_MAX_NOME)
+              : t.nome,
+        }));
+      }
+    }
+  } catch (erro) {
+    console.error("Erro ao carregar as categorias:", erro);
+  }
+  return TIERS_PADRAO.map((t) => ({ ...t }));
+}
+
+// ---------- localStorage: carregar a classificação ----------
+function carregarTierList(chaveStorage, jogos, tiers) {
   try {
     const salvo = localStorage.getItem(chaveStorage);
     if (salvo) {
@@ -74,7 +252,9 @@ function carregarTierList(chaveStorage, jogos) {
       if (dados && typeof dados === "object") {
         const idsValidos = jogos.map((j) => j.id);
         const usados = new Set();
-        const resultado = { S: [], A: [], B: [], C: [], D: [], semClassificacao: [] };
+        const resultado = {};
+        for (const tier of tiers) resultado[tier.id] = [];
+        resultado.semClassificacao = [];
 
         for (const chave of Object.keys(resultado)) {
           if (Array.isArray(dados[chave])) {
@@ -97,7 +277,7 @@ function carregarTierList(chaveStorage, jogos) {
   } catch (erro) {
     console.error("Erro ao carregar a tier list do localStorage:", erro);
   }
-  return criarTierListInicial(jogos);
+  return criarTierListInicial(jogos, tiers);
 }
 
 // ---------- localStorage: carregar as imagens adicionadas ----------
@@ -113,8 +293,6 @@ function carregarCustom() {
 }
 
 // ---------- Jogos que aparecem em um gênero ----------
-// Padrão: filtrados por gênero. Custom: aparecem no gênero em que foram
-// criados e também na opção "Todos".
 function montarBanco(genero, custom) {
   const padrao =
     genero === "Todos"
@@ -124,7 +302,7 @@ function montarBanco(genero, custom) {
   return [...padrao, ...extras];
 }
 
-// ---------- Redimensiona a imagem escolhida (economiza espaço no localStorage) ----------
+// ---------- Redimensiona a imagem escolhida ----------
 function redimensionarImagem(arquivo, largura = 200, altura = 280) {
   return new Promise((resolve, reject) => {
     const leitor = new FileReader();
@@ -138,7 +316,6 @@ function redimensionarImagem(arquivo, largura = 200, altura = 280) {
         canvas.height = altura;
         const ctx = canvas.getContext("2d");
 
-        // Preenche o quadro inteiro, cortando o excesso (efeito "capa")
         const escala = Math.max(largura / img.width, altura / img.height);
         const w = img.width * escala;
         const h = img.height * escala;
@@ -154,20 +331,43 @@ function redimensionarImagem(arquivo, largura = 200, altura = 280) {
 
 export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
   const chaveStorage = `tierlist:${generoSelecionado}`;
+  const chaveTiers = `tierlist:tiers:${generoSelecionado}`;
+  const chaveNomesAntiga = `tierlist:nomes:${generoSelecionado}`;
 
   const [jogosCustom, setJogosCustom] = useState(carregarCustom);
+  const [tiers, setTiers] = useState(() => carregarTiers(chaveTiers, chaveNomesAntiga));
   const [tierList, setTierList] = useState(() =>
-    carregarTierList(chaveStorage, montarBanco(generoSelecionado, carregarCustom()))
+    carregarTierList(
+      chaveStorage,
+      montarBanco(generoSelecionado, carregarCustom()),
+      carregarTiers(chaveTiers, chaveNomesAntiga)
+    )
   );
-  const [arrastandoId, setArrastandoId] = useState(null);
+  const [selecionados, setSelecionados] = useState([]);
 
-  // Campos do painel "Adicionar imagem"
+  // Arraste: { ids, principal, x, y } enquanto há uma capa sendo arrastada
+  const [arrasto, setArrasto] = useState(null);
+  const [tierSobre, setTierSobre] = useState(null);
+  const pendenteRef = useRef(null); // clique em uma capa ainda não resolvido
+  const ponteiroRef = useRef({ x: 0, y: 0 });
+  const acoesRef = useRef({});
+
+  // Menu (⋯) de uma categoria
+  const [menuAberto, setMenuAberto] = useState(null);
+
+  // Edição do nome de uma categoria
+  const [editandoTier, setEditandoTier] = useState(null);
+  const [textoEdicao, setTextoEdicao] = useState("");
+  const cancelouEdicao = useRef(false);
+
+  // Campos para adicionar imagem
   const [tituloNovo, setTituloNovo] = useState("");
   const [urlNova, setUrlNova] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [aviso, setAviso] = useState("");
 
   const bancoJogos = montarBanco(generoSelecionado, jogosCustom);
+  const arrastando = arrasto !== null;
 
   // ---------- localStorage: salvar a classificação ----------
   useEffect(() => {
@@ -177,6 +377,15 @@ export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
       console.error("Erro ao salvar a tier list no localStorage:", erro);
     }
   }, [tierList, chaveStorage]);
+
+  // ---------- localStorage: salvar as categorias ----------
+  useEffect(() => {
+    try {
+      localStorage.setItem(chaveTiers, JSON.stringify(tiers));
+    } catch (erro) {
+      console.error("Erro ao salvar as categorias:", erro);
+    }
+  }, [tiers, chaveTiers]);
 
   // ---------- localStorage: salvar as imagens adicionadas ----------
   useEffect(() => {
@@ -188,31 +397,250 @@ export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
     }
   }, [jogosCustom]);
 
+  // ---------- Cursor e seleção de texto durante o arraste ----------
+  useEffect(() => {
+    if (!arrastando) return;
+    const antes = {
+      userSelect: document.body.style.userSelect,
+      cursor: document.body.style.cursor,
+    };
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+    return () => {
+      document.body.style.userSelect = antes.userSelect;
+      document.body.style.cursor = antes.cursor;
+    };
+  }, [arrastando]);
+
+  // ---------- Fecha o menu ao clicar fora ou apertar Esc ----------
+  useEffect(() => {
+    if (!menuAberto) return;
+    const aoClicarFora = (e) => {
+      if (!e.target.closest("[data-menu]")) setMenuAberto(null);
+    };
+    const aoTeclar = (e) => {
+      if (e.key === "Escape") setMenuAberto(null);
+    };
+    window.addEventListener("pointerdown", aoClicarFora);
+    window.addEventListener("keydown", aoTeclar);
+    return () => {
+      window.removeEventListener("pointerdown", aoClicarFora);
+      window.removeEventListener("keydown", aoTeclar);
+    };
+  }, [menuAberto]);
+
   const buscarJogo = (id) => bancoJogos.find((j) => j.id === id);
 
-  // Remove o id de qualquer tier em que ele esteja e o insere no tier de destino
-  function moverJogo(id, tierDestino) {
+  // ---------- Mover um ou vários jogos para uma linha ----------
+  function moverJogos(ids, destino) {
+    if (!ids || ids.length === 0) return;
     setTierList((atual) => {
+      if (!Array.isArray(atual[destino])) return atual;
       const proximo = {};
       for (const chave of Object.keys(atual)) {
-        proximo[chave] = atual[chave].filter((jogoId) => jogoId !== id);
+        proximo[chave] = atual[chave].filter((jogoId) => !ids.includes(jogoId));
       }
-      proximo[tierDestino] = [...proximo[tierDestino], id];
+      proximo[destino] = [...proximo[destino], ...ids];
       return proximo;
+    });
+    setSelecionados([]);
+  }
+
+  // ---------- Seleção ----------
+  function alternarSelecao(id) {
+    setSelecionados((atual) =>
+      atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]
+    );
+  }
+
+  function selecionarTodosSemClassificacao() {
+    setSelecionados(tierList.semClassificacao || []);
+  }
+
+  // Clique no nome da linha: envia os selecionados para lá
+  function aoClicarNoTier(id) {
+    if (selecionados.length > 0) moverJogos(selecionados, id);
+  }
+
+  // ---------- Arraste próprio (a roda do mouse funciona durante ele) ----------
+  function aoPressionarCapa(e, id) {
+    if (e.button !== 0) return;
+    if (e.target.closest("button")) return; // botão de remover
+    const ids = selecionados.includes(id) ? selecionados : [id];
+    pendenteRef.current = {
+      id,
+      ids,
+      startX: e.clientX,
+      startY: e.clientY,
+      ativo: false,
+    };
+    ponteiroRef.current = { x: e.clientX, y: e.clientY };
+  }
+
+  function aoMoverPonteiro(e) {
+    const p = pendenteRef.current;
+    if (!p) return;
+    ponteiroRef.current = { x: e.clientX, y: e.clientY };
+
+    if (!p.ativo) {
+      // Só vira arraste depois de mover alguns pixels (senão é um clique)
+      if (Math.hypot(e.clientX - p.startX, e.clientY - p.startY) < 6) return;
+      p.ativo = true;
+    }
+
+    setArrasto({ ids: p.ids, principal: p.id, x: e.clientX, y: e.clientY });
+    setTierSobre(descobrirTier(e.clientX, e.clientY));
+  }
+
+  function aoSoltarPonteiro(e) {
+    const p = pendenteRef.current;
+    if (!p) return;
+    pendenteRef.current = null;
+
+    if (p.ativo) {
+      const destino = descobrirTier(e.clientX, e.clientY);
+      if (destino) moverJogos(p.ids, destino);
+      setArrasto(null);
+      setTierSobre(null);
+    } else {
+      // Não moveu: foi um clique, então alterna a seleção
+      alternarSelecao(p.id);
+    }
+  }
+
+  function cancelarArrasto() {
+    pendenteRef.current = null;
+    setArrasto(null);
+    setTierSobre(null);
+  }
+
+  // Quando a página rola (roda do mouse), recalcula qual linha está em destaque
+  function aoRolarPagina() {
+    const p = pendenteRef.current;
+    if (!p || !p.ativo) return;
+    setTierSobre(descobrirTier(ponteiroRef.current.x, ponteiroRef.current.y));
+  }
+
+  // Sempre guarda as funções mais recentes para os listeners fixos abaixo
+  useEffect(() => {
+    acoesRef.current = {
+      mover: aoMoverPonteiro,
+      soltar: aoSoltarPonteiro,
+      cancelar: cancelarArrasto,
+      rolar: aoRolarPagina,
+    };
+  });
+
+  // Listeners globais registrados uma única vez
+  useEffect(() => {
+    const mover = (e) => acoesRef.current.mover?.(e);
+    const soltar = (e) => acoesRef.current.soltar?.(e);
+    const cancelar = () => acoesRef.current.cancelar?.();
+    const rolar = () => acoesRef.current.rolar?.();
+    const teclar = (e) => {
+      if (e.key === "Escape") acoesRef.current.cancelar?.();
+    };
+
+    window.addEventListener("pointermove", mover);
+    window.addEventListener("pointerup", soltar);
+    window.addEventListener("pointercancel", cancelar);
+    window.addEventListener("scroll", rolar, { passive: true });
+    window.addEventListener("keydown", teclar);
+    return () => {
+      window.removeEventListener("pointermove", mover);
+      window.removeEventListener("pointerup", soltar);
+      window.removeEventListener("pointercancel", cancelar);
+      window.removeEventListener("scroll", rolar);
+      window.removeEventListener("keydown", teclar);
+    };
+  }, []);
+
+  // ---------- Categorias: renomear ----------
+  function iniciarEdicao(tier) {
+    cancelouEdicao.current = false;
+    setTextoEdicao(tier.nome);
+    setEditandoTier(tier.id);
+  }
+
+  function salvarEdicao() {
+    if (cancelouEdicao.current) {
+      cancelouEdicao.current = false;
+      setEditandoTier(null);
+      return;
+    }
+    if (editandoTier) {
+      const novoNome = textoEdicao.trim();
+      if (novoNome) {
+        setTiers((atual) =>
+          atual.map((t) => (t.id === editandoTier ? { ...t, nome: novoNome } : t))
+        );
+      }
+    }
+    setEditandoTier(null);
+  }
+
+  function aoTeclarNoNome(e) {
+    if (e.key === "Enter") {
+      e.currentTarget.blur(); // dispara salvarEdicao via onBlur
+    } else if (e.key === "Escape") {
+      cancelouEdicao.current = true;
+      e.currentTarget.blur();
+    }
+  }
+
+  // ---------- Categorias: criar, cor, ordem e remover ----------
+  function adicionarTier() {
+    if (tiers.length >= MAX_TIERS) return;
+    const id = `t${Date.now()}`;
+    const nova = {
+      id,
+      nome: "Nova",
+      cor: CORES_NOVAS[tiers.length % CORES_NOVAS.length],
+    };
+    setTiers((atual) => [...atual, nova]);
+    setTierList((atual) => ({ ...atual, [id]: [] }));
+    iniciarEdicao(nova); // já abre para digitar o nome
+  }
+
+  function mudarCor(id, cor) {
+    setTiers((atual) => atual.map((t) => (t.id === id ? { ...t, cor } : t)));
+  }
+
+  function moverTier(id, delta) {
+    setTiers((atual) => {
+      const i = atual.findIndex((t) => t.id === id);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= atual.length) return atual;
+      const copia = [...atual];
+      [copia[i], copia[j]] = [copia[j], copia[i]];
+      return copia;
     });
   }
 
-  function aoSoltar(e, tierDestino) {
-    e.preventDefault();
-    const id = Number(e.dataTransfer.getData("text/plain"));
-    if (id) moverJogo(id, tierDestino);
-    setArrastandoId(null);
+  function removerTier(id) {
+    if (tiers.length <= 1) return;
+    const tier = tiers.find((t) => t.id === id);
+    if (!tier) return;
+    if (
+      !window.confirm(
+        `Remover a categoria "${tier.nome}"? Os jogos dela voltam para "Sem classificação".`
+      )
+    ) {
+      return;
+    }
+    setTiers((atual) => atual.filter((t) => t.id !== id));
+    setTierList((atual) => {
+      const { [id]: removidos = [], ...resto } = atual;
+      return { ...resto, semClassificacao: [...resto.semClassificacao, ...removidos] };
+    });
+    setSelecionados([]);
   }
 
-  // Devolve todos os jogos para "Sem classificação"
+  // Devolve todos os jogos para "Sem classificação" (mantém as categorias)
   function resetarTierList() {
     if (window.confirm("Deseja limpar a classificação desta tier list?")) {
-      setTierList(criarTierListInicial(bancoJogos));
+      setTierList(criarTierListInicial(bancoJogos, tiers));
+      setSelecionados([]);
     }
   }
 
@@ -238,7 +666,7 @@ export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
 
   async function aoEscolherArquivos(e) {
     const arquivos = Array.from(e.target.files || []);
-    e.target.value = ""; // permite escolher o mesmo arquivo de novo
+    e.target.value = "";
     if (arquivos.length === 0) return;
 
     setAviso("");
@@ -280,6 +708,7 @@ export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
   function removerJogo(id) {
     if (!window.confirm("Remover esta imagem?")) return;
     setJogosCustom((atual) => atual.filter((j) => j.id !== id));
+    setSelecionados((atual) => atual.filter((x) => x !== id));
     setTierList((atual) => {
       const proximo = {};
       for (const chave of Object.keys(atual)) {
@@ -293,127 +722,373 @@ export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
   function renderCapa(id) {
     const jogo = buscarJogo(id);
     if (!jogo) return null;
+
     return (
       <Capa
         key={id}
         jogo={jogo}
-        arrastando={arrastandoId === id}
-        onDragStart={(e) => {
-          e.dataTransfer.setData("text/plain", String(id));
-          setArrastandoId(id);
-        }}
-        onDragEnd={() => setArrastandoId(null)}
+        selecionado={selecionados.includes(id)}
+        arrastando={arrasto ? arrasto.ids.includes(id) : false}
+        onPointerDown={(e) => aoPressionarCapa(e, id)}
         aoRemover={jogo.custom ? () => removerJogo(id) : undefined}
       />
     );
   }
 
+  // Tamanho da fonte do nome conforme o comprimento
+  function tamanhoFonte(nome) {
+    if (nome.length <= 2) return "24px";
+    if (nome.length <= 6) return "17px";
+    return "13px";
+  }
+
+  const jogoFantasma = arrasto ? buscarJogo(arrasto.principal) : null;
+  const semClassificacao = tierList.semClassificacao || [];
+
   return (
     <div style={estilos.pagina}>
+      <style>{CSS}</style>
+
       <div style={estilos.cabecalho}>
-        <button style={estilos.botaoVoltar} onClick={aoVoltar}>
-          ← Voltar
+        <button className="tl-ghost" style={estilos.botaoVoltar} onClick={aoVoltar}>
+          <Icone nome="voltar" tamanho={16} />
+          Voltar
         </button>
         <h1 style={estilos.titulo}>
-          Tier List de Jogos {generoSelecionado !== "Todos" && `— ${generoSelecionado}`}
+          Tier List de Jogos
+          {generoSelecionado !== "Todos" && (
+            <span style={estilos.tituloGenero}> / {generoSelecionado}</span>
+          )}
         </h1>
-        <button style={estilos.botaoResetar} onClick={resetarTierList}>
+        <button className="tl-ghost" style={estilos.botaoResetar} onClick={resetarTierList}>
           Limpar
         </button>
       </div>
 
-      {/* Linhas de tier (S, A, B, C, D) */}
-      <div style={estilos.tabela}>
-        {TIERS.map(({ chave, label, cor }) => (
-          <div
-            key={chave}
-            style={estilos.linha}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => aoSoltar(e, chave)}
-          >
-            <div style={{ ...estilos.rotulo, background: cor }}>{label}</div>
-            <div style={estilos.slots}>{tierList[chave].map(renderCapa)}</div>
+      {/* Barra de seleção: fica fixa no topo enquanto você rola a página */}
+      {selecionados.length > 0 && (
+        <div style={estilos.barraSelecao}>
+          <span style={estilos.barraTexto}>
+            {selecionados.length} selecionado{selecionados.length > 1 ? "s" : ""}
+          </span>
+
+          <div style={estilos.barraChips}>
+            {tiers.map((tier) => (
+              <button
+                key={tier.id}
+                onClick={() => moverJogos(selecionados, tier.id)}
+                style={{
+                  ...estilos.botaoTierRapido,
+                  background: tier.cor,
+                  color: corTexto(tier.cor),
+                }}
+                title={`Enviar para ${tier.nome}`}
+              >
+                {tier.nome}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* Painel para adicionar imagens */}
-      <div style={estilos.painel}>
-        <div style={estilos.painelTitulo}>Adicionar imagem</div>
-
-        <div style={estilos.painelLinha}>
-          <input
-            type="text"
-            placeholder="Nome (opcional)"
-            value={tituloNovo}
-            onChange={(e) => setTituloNovo(e.target.value)}
-            style={estilos.input}
-          />
-
-          <label style={estilos.botaoArquivo}>
-            {carregando ? "Carregando..." : "Escolher do computador"}
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={aoEscolherArquivos}
-              disabled={carregando}
-              style={{ display: "none" }}
-            />
-          </label>
-        </div>
-
-        <div style={estilos.painelLinha}>
-          <input
-            type="text"
-            placeholder="ou cole o link de uma imagem (https://...)"
-            value={urlNova}
-            onChange={(e) => setUrlNova(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && adicionarPorUrl()}
-            style={{ ...estilos.input, flex: 1 }}
-          />
-          <button style={estilos.botaoAdicionar} onClick={adicionarPorUrl}>
-            Adicionar link
+          <button
+            className="tl-ghost"
+            onClick={() => moverJogos(selecionados, "semClassificacao")}
+            style={estilos.botaoBarra}
+          >
+            Sem classificação
+          </button>
+          <button
+            className="tl-ghost"
+            onClick={() => setSelecionados([])}
+            style={{ ...estilos.botaoBarra, marginLeft: "auto" }}
+            title="Cancelar seleção"
+          >
+            <Icone nome="fechar" tamanho={14} />
+            Cancelar
           </button>
         </div>
+      )}
 
-        {aviso && <div style={estilos.aviso}>{aviso}</div>}
+      {/* Categorias (linhas) */}
+      <div style={estilos.tabela}>
+        {tiers.map((tier, indice) => {
+          const editando = editandoTier === tier.id;
+          const corDoTexto = corTexto(tier.cor);
+          const primeiro = indice === 0;
+          const ultimo = indice === tiers.length - 1;
+          const raioTopo = primeiro ? 9 : 0;
+          const raioBase = ultimo ? 9 : 0;
+
+          return (
+            <div
+              key={tier.id}
+              className="tl-linha"
+              data-tier={tier.id}
+              style={{
+                ...estilos.linha,
+                borderRadius: `${raioTopo}px ${raioTopo}px ${raioBase}px ${raioBase}px`,
+                borderBottom: ultimo ? "none" : estilos.linha.borderBottom,
+                ...(tierSobre === tier.id ? estilos.alvo : null),
+              }}
+            >
+              <div
+                style={{
+                  ...estilos.rotulo,
+                  background: tier.cor,
+                  color: corDoTexto,
+                  borderRadius: `${raioTopo}px 0 0 ${raioBase}px`,
+                  cursor: selecionados.length > 0 ? "pointer" : "default",
+                }}
+                onClick={() => !editando && aoClicarNoTier(tier.id)}
+                onDoubleClick={() => !editando && iniciarEdicao(tier)}
+                title={
+                  selecionados.length > 0
+                    ? `Enviar ${selecionados.length} selecionado(s) para ${tier.nome}`
+                    : "Dois cliques para renomear"
+                }
+              >
+                {editando ? (
+                  <input
+                    autoFocus
+                    value={textoEdicao}
+                    maxLength={TAMANHO_MAX_NOME}
+                    onChange={(e) => setTextoEdicao(e.target.value)}
+                    onBlur={salvarEdicao}
+                    onKeyDown={aoTeclarNoNome}
+                    onFocus={(e) => e.target.select()}
+                    style={estilos.inputNome}
+                  />
+                ) : (
+                  <span style={{ ...estilos.nomeTier, fontSize: tamanhoFonte(tier.nome) }}>
+                    {tier.nome}
+                  </span>
+                )}
+
+                {/* Menu da categoria (aparece ao passar o mouse) */}
+                {!editando && (
+                  <div
+                    data-menu
+                    style={estilos.menuContainer}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      className={`tl-menu-btn${menuAberto === tier.id ? " aberto" : ""}`}
+                      style={estilos.botaoMenu}
+                      onClick={() => setMenuAberto(menuAberto === tier.id ? null : tier.id)}
+                      title="Opções da categoria"
+                      aria-label={`Opções da categoria ${tier.nome}`}
+                      aria-expanded={menuAberto === tier.id}
+                    >
+                      <Icone nome="mais-opcoes" tamanho={16} />
+                    </button>
+
+                    {menuAberto === tier.id && (
+                      <div style={estilos.menu} role="menu">
+                        <button
+                          className="tl-item"
+                          style={estilos.menuItem}
+                          onClick={() => {
+                            setMenuAberto(null);
+                            iniciarEdicao(tier);
+                          }}
+                        >
+                          <Icone nome="editar" />
+                          Renomear
+                        </button>
+
+                        <label className="tl-item" style={estilos.menuItem}>
+                          <span style={{ ...estilos.amostra, background: tier.cor }} />
+                          Cor
+                          <input
+                            type="color"
+                            value={tier.cor}
+                            onChange={(e) => mudarCor(tier.id, e.target.value)}
+                            aria-label={`Trocar a cor da categoria ${tier.nome}`}
+                            style={estilos.inputCorOculto}
+                          />
+                        </label>
+
+                        <div style={estilos.menuDivisor} />
+
+                        <button
+                          className="tl-item"
+                          style={{ ...estilos.menuItem, ...(primeiro ? estilos.menuItemOff : null) }}
+                          disabled={primeiro}
+                          onClick={() => moverTier(tier.id, -1)}
+                        >
+                          <Icone nome="cima" />
+                          Mover para cima
+                        </button>
+                        <button
+                          className="tl-item"
+                          style={{ ...estilos.menuItem, ...(ultimo ? estilos.menuItemOff : null) }}
+                          disabled={ultimo}
+                          onClick={() => moverTier(tier.id, 1)}
+                        >
+                          <Icone nome="baixo" />
+                          Mover para baixo
+                        </button>
+
+                        <div style={estilos.menuDivisor} />
+
+                        <button
+                          className="tl-item"
+                          style={{
+                            ...estilos.menuItem,
+                            color: "#ff8a8a",
+                            ...(tiers.length <= 1 ? estilos.menuItemOff : null),
+                          }}
+                          disabled={tiers.length <= 1}
+                          onClick={() => {
+                            setMenuAberto(null);
+                            removerTier(tier.id);
+                          }}
+                        >
+                          <Icone nome="lixeira" />
+                          Remover
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={estilos.slots}>{(tierList[tier.id] || []).map(renderCapa)}</div>
+            </div>
+          );
+        })}
       </div>
+
+      {/* Nova categoria */}
+      <button
+        className="tl-ghost"
+        style={{
+          ...estilos.botaoNovaCategoria,
+          opacity: tiers.length >= MAX_TIERS ? 0.5 : 1,
+          cursor: tiers.length >= MAX_TIERS ? "default" : "pointer",
+        }}
+        onClick={adicionarTier}
+        disabled={tiers.length >= MAX_TIERS}
+      >
+        <Icone nome="mais" tamanho={15} />
+        {tiers.length >= MAX_TIERS
+          ? `Limite de ${MAX_TIERS} categorias`
+          : "Nova categoria"}
+      </button>
 
       {/* Banco de jogos ainda não classificados */}
       <div
-        style={estilos.banco}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => aoSoltar(e, "semClassificacao")}
+        data-tier="semClassificacao"
+        style={{
+          ...estilos.banco,
+          ...(tierSobre === "semClassificacao" ? estilos.alvo : null),
+        }}
       >
-        <div style={estilos.bancoTitulo}>Sem classificação</div>
-        <div style={estilos.slots}>{tierList.semClassificacao.map(renderCapa)}</div>
+        <div style={estilos.bancoCabecalho}>
+          <div style={estilos.bancoTitulo}>
+            Sem classificação
+            <span style={estilos.bancoContagem}>{semClassificacao.length}</span>
+          </div>
+          {semClassificacao.length > 0 && (
+            <button
+              className="tl-ghost"
+              style={estilos.botaoSutil}
+              onClick={selecionarTodosSemClassificacao}
+            >
+              Selecionar todos
+            </button>
+          )}
+        </div>
+        <div style={estilos.slots}>{semClassificacao.map(renderCapa)}</div>
+        {semClassificacao.length > 0 && (
+          <div style={estilos.dica}>
+            Clique para selecionar, arraste para mover. A roda do mouse rola a página.
+          </div>
+        )}
       </div>
+
+      {/* Adicionar imagem (uma linha só) */}
+      <div style={estilos.adicionar}>
+        <input
+          type="text"
+          placeholder="Nome (opcional)"
+          value={tituloNovo}
+          onChange={(e) => setTituloNovo(e.target.value)}
+          style={{ ...estilos.input, width: "170px" }}
+        />
+        <input
+          type="text"
+          placeholder="Link de uma imagem (https://...)"
+          value={urlNova}
+          onChange={(e) => setUrlNova(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && adicionarPorUrl()}
+          style={{ ...estilos.input, flex: 1, minWidth: "220px" }}
+        />
+        <button className="tl-ghost" style={estilos.botaoSutil} onClick={adicionarPorUrl}>
+          Adicionar link
+        </button>
+        <label style={estilos.botaoArquivo}>
+          <Icone nome="imagem" tamanho={15} />
+          {carregando ? "Carregando..." : "Enviar imagem"}
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={aoEscolherArquivos}
+            disabled={carregando}
+            style={{ display: "none" }}
+          />
+        </label>
+      </div>
+      {aviso && <div style={estilos.aviso}>{aviso}</div>}
+
+      {/* Capa que acompanha o mouse durante o arraste */}
+      {arrasto && jogoFantasma && (
+        <div style={{ ...estilos.fantasma, left: arrasto.x + 10, top: arrasto.y + 10 }}>
+          <img src={jogoFantasma.capaUrl} alt="" style={estilos.fantasmaImg} draggable={false} />
+          {arrasto.ids.length > 1 && <span style={estilos.contador}>{arrasto.ids.length}</span>}
+        </div>
+      )}
     </div>
   );
 }
 
-// ---------- Subcomponente: capa arrastável de um jogo ----------
-function Capa({ jogo, arrastando, onDragStart, onDragEnd, aoRemover }) {
+// ---------- Subcomponente: capa selecionável e arrastável ----------
+function Capa({ jogo, selecionado, arrastando, onPointerDown, aoRemover }) {
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      className="tl-capa"
+      onPointerDown={onPointerDown}
+      onDragStart={(e) => e.preventDefault()}
       title={jogo.titulo}
       style={{ ...estilos.capaWrapper, opacity: arrastando ? 0.35 : 1 }}
     >
-      <img src={jogo.capaUrl} alt={jogo.titulo} style={estilos.capaImg} draggable={false} />
+      <img
+        src={jogo.capaUrl}
+        alt={jogo.titulo}
+        style={{
+          ...estilos.capaImg,
+          border: selecionado ? "2px solid #5bc0ff" : "1px solid #2f303a",
+        }}
+        draggable={false}
+      />
       <span style={estilos.capaLegenda}>{jogo.titulo}</span>
+
+      {selecionado && (
+        <span style={estilos.marcaSelecao}>
+          <Icone nome="check" tamanho={11} />
+        </span>
+      )}
 
       {aoRemover && (
         <button
+          className="tl-remover"
           onClick={aoRemover}
           title="Remover imagem"
           aria-label={`Remover ${jogo.titulo}`}
           style={estilos.botaoRemover}
         >
-          ×
+          <Icone nome="fechar" tamanho={11} />
         </button>
       )}
     </div>
@@ -432,51 +1107,185 @@ const estilos = {
   cabecalho: {
     display: "flex",
     alignItems: "center",
-    gap: "16px",
-    marginBottom: "16px",
+    gap: "14px",
+    marginBottom: "18px",
   },
   botaoVoltar: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "4px",
     background: "transparent",
-    color: "#f2f2f2",
-    border: "1px solid #3a3b44",
+    color: "#c7c8d1",
+    border: "none",
     borderRadius: "6px",
-    padding: "8px 14px",
+    padding: "7px 10px 7px 6px",
     fontSize: "14px",
     cursor: "pointer",
   },
+  titulo: { fontSize: "20px", fontWeight: 700, margin: 0 },
+  tituloGenero: { color: "#8b8c98", fontWeight: 500 },
   botaoResetar: {
     marginLeft: "auto",
     background: "transparent",
-    color: "#ff8a8a",
-    border: "1px solid #5a3a3f",
+    color: "#8b8c98",
+    border: "none",
     borderRadius: "6px",
-    padding: "8px 14px",
+    padding: "7px 10px",
     fontSize: "14px",
     cursor: "pointer",
   },
-  titulo: { fontSize: "22px", fontWeight: 700 },
+  barraSelecao: {
+    position: "sticky",
+    top: 0,
+    zIndex: 10,
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: "10px",
+    background: "#1c2530",
+    border: "1px solid #2f4a63",
+    borderRadius: "10px",
+    padding: "8px 12px",
+    marginBottom: "12px",
+  },
+  barraTexto: { fontSize: "13px", fontWeight: 600, color: "#9bd3f5" },
+  barraChips: { display: "flex", gap: "6px", flexWrap: "wrap" },
+  botaoTierRapido: {
+    minWidth: "30px",
+    height: "30px",
+    padding: "0 9px",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  botaoBarra: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    background: "transparent",
+    color: "#c7c8d1",
+    border: "none",
+    borderRadius: "6px",
+    padding: "6px 9px",
+    fontSize: "13px",
+    cursor: "pointer",
+  },
   tabela: {
     display: "flex",
     flexDirection: "column",
     border: "1px solid #2b2c34",
-    borderRadius: "8px",
-    overflow: "hidden",
+    borderRadius: "10px",
   },
   linha: {
     display: "flex",
-    minHeight: "110px",
+    minHeight: "112px",
     borderBottom: "1px solid #2b2c34",
     background: "#1b1c22",
   },
+  alvo: {
+    outline: "2px solid #5bc0ff",
+    outlineOffset: "-2px",
+    background: "#202733",
+  },
   rotulo: {
-    width: "56px",
+    position: "relative",
+    width: "96px",
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    padding: "8px",
+    boxSizing: "border-box",
+    userSelect: "none",
+  },
+  nomeTier: {
     fontWeight: 800,
-    fontSize: "20px",
+    textAlign: "center",
+    lineHeight: "1.15",
+    wordBreak: "break-word",
+    maxWidth: "100%",
+  },
+  inputNome: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "#fff",
     color: "#14151a",
+    border: "2px solid #14151a",
+    borderRadius: "4px",
+    padding: "4px",
+    fontSize: "14px",
+    fontWeight: 700,
+    textAlign: "center",
+  },
+  menuContainer: {
+    position: "absolute",
+    top: "4px",
+    right: "4px",
+  },
+  botaoMenu: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "24px",
+    height: "24px",
+    background: "rgba(0,0,0,0.18)",
+    color: "inherit",
+    border: "none",
+    borderRadius: "6px",
+    padding: 0,
+    cursor: "pointer",
+  },
+  menu: {
+    position: "absolute",
+    top: "30px",
+    left: 0,
+    zIndex: 30,
+    minWidth: "172px",
+    background: "#23242c",
+    color: "#e6e6ec",
+    border: "1px solid #3a3b44",
+    borderRadius: "10px",
+    padding: "4px",
+    boxShadow: "0 10px 28px rgba(0,0,0,0.5)",
+    fontWeight: 400,
+  },
+  menuItem: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "7px 10px",
+    background: "transparent",
+    color: "inherit",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "13px",
+    fontFamily: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  menuItemOff: { opacity: 0.35, cursor: "default" },
+  menuDivisor: { height: "1px", background: "#34353f", margin: "4px 2px" },
+  amostra: {
+    width: "14px",
+    height: "14px",
+    borderRadius: "50%",
+    border: "1px solid rgba(255,255,255,0.25)",
+    flexShrink: 0,
+    boxSizing: "border-box",
+  },
+  inputCorOculto: {
+    position: "absolute",
+    left: 0,
+    bottom: 0,
+    width: "1px",
+    height: "1px",
+    opacity: 0,
+    pointerEvents: "none",
   },
   slots: {
     flex: 1,
@@ -486,59 +1295,93 @@ const estilos = {
     padding: "8px",
     alignContent: "flex-start",
   },
-  painel: {
-    marginTop: "20px",
-    background: "#1b1c22",
-    border: "1px solid #2b2c34",
-    borderRadius: "8px",
-    padding: "14px",
+  botaoNovaCategoria: {
     display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-  },
-  painelTitulo: { fontSize: "14px", fontWeight: 700 },
-  painelLinha: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
     alignItems: "center",
-  },
-  input: {
-    background: "#14151a",
-    color: "#f2f2f2",
-    border: "1px solid #3a3b44",
-    borderRadius: "6px",
-    padding: "9px 12px",
-    fontSize: "14px",
-    minWidth: "200px",
-  },
-  botaoArquivo: {
-    background: "#ff5b5b",
-    color: "#14151a",
-    borderRadius: "6px",
-    padding: "9px 14px",
-    fontSize: "14px",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  botaoAdicionar: {
+    justifyContent: "center",
+    gap: "6px",
+    marginTop: "10px",
+    width: "100%",
     background: "transparent",
-    color: "#f2f2f2",
-    border: "1px solid #3a3b44",
-    borderRadius: "6px",
-    padding: "9px 14px",
-    fontSize: "14px",
-    cursor: "pointer",
+    color: "#9a9ba5",
+    border: "1px dashed #34353f",
+    borderRadius: "10px",
+    padding: "9px",
+    fontSize: "13px",
   },
-  aviso: { fontSize: "13px", color: "#ffb86b" },
   banco: {
-    marginTop: "20px",
-    border: "1px dashed #3a3b44",
-    borderRadius: "8px",
+    marginTop: "18px",
+    border: "1px dashed #34353f",
+    borderRadius: "10px",
     padding: "12px",
     minHeight: "120px",
   },
-  bancoTitulo: { fontSize: "13px", color: "#9a9ba5", marginBottom: "8px" },
+  bancoCabecalho: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    marginBottom: "6px",
+  },
+  bancoTitulo: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#c7c8d1",
+  },
+  bancoContagem: {
+    fontSize: "12px",
+    fontWeight: 500,
+    color: "#8b8c98",
+    background: "#23242c",
+    borderRadius: "10px",
+    padding: "1px 8px",
+  },
+  dica: {
+    fontSize: "12px",
+    color: "#6f707b",
+    padding: "4px 8px 0",
+  },
+  botaoSutil: {
+    background: "transparent",
+    color: "#c7c8d1",
+    border: "1px solid #34353f",
+    borderRadius: "6px",
+    padding: "7px 12px",
+    fontSize: "13px",
+    cursor: "pointer",
+  },
+  adicionar: {
+    marginTop: "14px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+  input: {
+    background: "#1b1c22",
+    color: "#f2f2f2",
+    border: "1px solid #2f303a",
+    borderRadius: "6px",
+    padding: "8px 11px",
+    fontSize: "13px",
+    boxSizing: "border-box",
+  },
+  botaoArquivo: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "7px",
+    background: "#ff5b5b",
+    color: "#14151a",
+    borderRadius: "6px",
+    padding: "8px 13px",
+    fontSize: "13px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  aviso: { marginTop: "8px", fontSize: "13px", color: "#ffb86b" },
   capaWrapper: {
     position: "relative",
     width: "72px",
@@ -547,35 +1390,88 @@ const estilos = {
     flexDirection: "column",
     alignItems: "center",
     gap: "4px",
+    userSelect: "none",
+    touchAction: "none",
   },
   capaImg: {
     width: "72px",
     height: "100px",
     objectFit: "cover",
-    borderRadius: "4px",
-    border: "1px solid #3a3b44",
+    borderRadius: "6px",
     background: "#14151a",
+    boxSizing: "border-box",
+    display: "block",
   },
   capaLegenda: {
+    width: "100%",
     fontSize: "10px",
-    color: "#c7c8d1",
+    color: "#8b8c98",
     textAlign: "center",
     lineHeight: "1.2",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  marcaSelecao: {
+    position: "absolute",
+    top: "5px",
+    left: "5px",
+    width: "18px",
+    height: "18px",
+    borderRadius: "50%",
+    background: "#5bc0ff",
+    color: "#14151a",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   botaoRemover: {
     position: "absolute",
-    top: "-6px",
-    right: "-6px",
+    top: "4px",
+    right: "4px",
     width: "20px",
     height: "20px",
     borderRadius: "50%",
     border: "none",
-    background: "#ff5b5b",
-    color: "#14151a",
-    fontSize: "14px",
-    fontWeight: 800,
-    lineHeight: "20px",
+    background: "rgba(20,21,26,0.85)",
+    color: "#ff8a8a",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 0,
     cursor: "pointer",
+  },
+  fantasma: {
+    position: "fixed",
+    zIndex: 1000,
+    pointerEvents: "none",
+    opacity: 0.92,
+    transform: "rotate(-4deg)",
+  },
+  fantasmaImg: {
+    width: "64px",
+    height: "90px",
+    objectFit: "cover",
+    borderRadius: "6px",
+    border: "2px solid #5bc0ff",
+    boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
+    display: "block",
+  },
+  contador: {
+    position: "absolute",
+    top: "-8px",
+    right: "-8px",
+    minWidth: "22px",
+    height: "22px",
+    borderRadius: "11px",
+    background: "#5bc0ff",
+    color: "#14151a",
+    fontSize: "12px",
+    fontWeight: 800,
+    lineHeight: "22px",
+    textAlign: "center",
+    padding: "0 5px",
+    boxSizing: "border-box",
   },
 };
