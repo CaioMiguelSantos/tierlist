@@ -1,7 +1,7 @@
 import { Component, useState } from "react";
 import HomePage from "./components/HomePage";
 import GenreSelect from "./components/GenreSelect";
-import TierList from "./components/TierList";
+import TierList from "./components/Tierlist";
 
 // Mostra o erro na tela em vez de deixar a página branca
 class CapturaErros extends Component {
@@ -28,13 +28,10 @@ class CapturaErros extends Component {
             {String(this.state.erro?.stack || this.state.erro)}
           </pre>
           <button
-            onClick={() => {
-              localStorage.clear();
-              window.location.reload();
-            }}
+            onClick={() => window.location.reload()}
             style={{ padding: "8px 14px", cursor: "pointer" }}
           >
-            Limpar dados salvos e recarregar
+            Recarregar a página
           </button>
         </div>
       );
@@ -45,7 +42,11 @@ class CapturaErros extends Component {
 
 function App() {
   const [tela, setTela] = useState("inicio"); // "inicio" | "generos" | "tierlist"
+
+  // chave: identificador usado para salvar os dados (nome do gênero padrão ou id do personalizado)
+  // nome:  texto exibido na tela
   const [generoSelecionado, setGeneroSelecionado] = useState("Todos");
+  const [generoNome, setGeneroNome] = useState("Todos");
 
   let conteudo;
 
@@ -54,14 +55,16 @@ function App() {
       <TierList
         key={generoSelecionado}
         generoSelecionado={generoSelecionado}
+        generoNome={generoNome}
         aoVoltar={() => setTela("generos")}
       />
     );
   } else if (tela === "generos") {
     conteudo = (
       <GenreSelect
-        aoSelecionar={(genero) => {
-          setGeneroSelecionado(genero);
+        aoSelecionar={(chave, nome) => {
+          setGeneroSelecionado(chave);
+          setGeneroNome(nome);
           setTela("tierlist");
         }}
         aoVoltar={() => setTela("inicio")}

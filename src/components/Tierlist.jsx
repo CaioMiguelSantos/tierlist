@@ -329,7 +329,8 @@ function redimensionarImagem(arquivo, largura = 200, altura = 280) {
   });
 }
 
-export default function TierList({ aoVoltar, generoSelecionado = "Todos" }) {
+export default function TierList({ aoVoltar, generoSelecionado = "Todos", generoNome }) {
+  const nomeExibido = generoNome || generoSelecionado;
   const chaveStorage = `tierlist:${generoSelecionado}`;
   const chaveTiers = `tierlist:tiers:${generoSelecionado}`;
   const chaveNomesAntiga = `tierlist:nomes:${generoSelecionado}`;
